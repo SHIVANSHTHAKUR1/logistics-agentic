@@ -71,10 +71,21 @@ class LLMParser:
         
         try:
             response = self.model.invoke([HumanMessage(content=prompt)])
-            # Parse the response and validate against schema
-            data = OwnerData.model_validate_json(response.content)
+            # Clean the response - remove markdown code blocks if present
+            content = response.content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            if content.startswith('```'):
+                content = content[3:]   # Remove ```
+            if content.endswith('```'):
+                content = content[:-3]  # Remove trailing ```
+            content = content.strip()
+            
+            data = OwnerData.model_validate_json(content)
+            print(f"🔍 LLM Parsed owner data: {data.model_dump()}")  # Debug output
             return data.model_dump()
         except Exception as e:
+            print(f"⚠️ LLM parsing failed, using fallback: {e}")  # Debug output
             # Fallback to basic parsing if LLM fails
             return self._fallback_parse_owner(text)
     
@@ -87,17 +98,30 @@ class LLMParser:
         Return a JSON object with the following structure:
         - name: Full name of the driver (required)
         - phone: Phone number if mentioned
-        - license_no: Driver's license number if mentioned
+        - license_no: Driver's license number if mentioned (look for patterns like DL1234567890, DL123456789, DL12345678, or any alphanumeric sequence that looks like a license)
         
         If any information is not clear or missing, use null for optional fields.
         Always provide a name, even if you have to make a reasonable assumption.
+        Look carefully for license numbers - they might be in various formats.
         """
         
         try:
             response = self.model.invoke([HumanMessage(content=prompt)])
-            data = DriverData.model_validate_json(response.content)
+            # Clean the response - remove markdown code blocks if present
+            content = response.content.strip()
+            if content.startswith('```json'):
+                content = content[7:]  # Remove ```json
+            if content.startswith('```'):
+                content = content[3:]   # Remove ```
+            if content.endswith('```'):
+                content = content[:-3]  # Remove trailing ```
+            content = content.strip()
+            
+            data = DriverData.model_validate_json(content)
+            print(f"🔍 LLM Parsed driver data: {data.model_dump()}")  # Debug output
             return data.model_dump()
         except Exception as e:
+            print(f"⚠️ LLM parsing failed, using fallback: {e}")  # Debug output
             return self._fallback_parse_driver(text)
     
     def parse_vehicle(self, text: str) -> Dict[str, Any]:
@@ -192,6 +216,7 @@ class LLMParser:
         if email_match:
             data['email'] = email_match.group(1)
         
+        print(f"🔍 Fallback parsed owner data: {data}")  # Debug output
         return data
     
     def _fallback_parse_driver(self, text: str) -> Dict[str, Any]:
@@ -199,18 +224,53 @@ class LLMParser:
         import re
         data = {"name": "Unknown Driver", "phone": None, "license_no": None}
         
-        name_match = re.search(r"(?:I am|I'm|This is)\s+([A-Z][a-zA-Z ]{1,60})", text)
-        if name_match:
-            data['name'] = name_match.group(1).strip()
+        # Extract name - more flexible patterns
+        name_patterns = [
+            r"(?:I am|I'm|This is|Name is|My name is)\s+([A-Z][a-zA-Z ]{1,60})",
+            r"([A-Z][a-z]+\s+[A-Z][a-z]+)",  # First Last format
+            r"driver\s+([A-Z][a-zA-Z ]{1,60})",  # "driver John Doe"
+        ]
         
-        phone_match = re.search(r"(\+?\d{10,13})", text)
-        if phone_match:
-            data['phone'] = phone_match.group(1)
+        for pattern in name_patterns:
+            name_match = re.search(pattern, text, re.IGNORECASE)
+            if name_match:
+                data['name'] = name_match.group(1).strip()
+                break
         
-        license_match = re.search(r"([A-Z]{2}\d{1,2}[A-Z]{1,2}\d{1,4})", text)
-        if license_match:
-            data['license_no'] = license_match.group(1)
+        # Extract phone - more flexible patterns
+        phone_patterns = [
+            r"(\+?\d{10,13})",  # Standard phone
+            r"phone\s*:?\s*(\+?\d{10,13})",  # "phone: 1234567890"
+            r"contact\s*:?\s*(\+?\d{10,13})",  # "contact: 1234567890"
+        ]
         
+        for pattern in phone_patterns:
+            phone_match = re.search(pattern, text, re.IGNORECASE)
+            if phone_match:
+                data['phone'] = phone_match.group(1)
+                break
+        
+        # Extract license - much more flexible patterns
+        license_patterns = [
+            r"license\s*:?\s*([A-Z]{2}\d{1,2}[A-Z]{1,2}\d{1,4})",  # DL1234567890
+            r"license\s*:?\s*([A-Z]{2}\d{6,10})",  # DL123456789
+            r"license\s*:?\s*([A-Z]{2}\d{4,8})",  # DL1234567
+            r"license\s*:?\s*([A-Z]{2}\d{2,6})",  # DL12345
+            r"license\s*:?\s*([A-Z]{2}\d+)",  # DL followed by any digits
+            r"license\s*:?\s*([A-Z0-9]{6,12})",  # Any alphanumeric 6-12 chars
+            r"DL\s*:?\s*([A-Z0-9]{6,12})",  # DL followed by alphanumeric
+            r"([A-Z]{2}\d{6,12})",  # Any 2 letters followed by 6-12 digits
+            r"([A-Z0-9]{8,15})",  # Any alphanumeric 8-15 chars (likely license)
+        ]
+        
+        for pattern in license_patterns:
+            license_match = re.search(pattern, text, re.IGNORECASE)
+            if license_match:
+                data['license_no'] = license_match.group(1).upper()
+                print(f"🔍 Found license with pattern '{pattern}': {data['license_no']}")  # Debug
+                break
+        
+        print(f"🔍 Fallback parsed driver data: {data}")  # Debug output
         return data
     
     def _fallback_parse_vehicle(self, text: str) -> Dict[str, Any]:

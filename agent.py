@@ -31,13 +31,13 @@ from tools import (
 # Create LangChain tools from our functions
 @tool
 def parse_owner_tool(text: str) -> Dict[str, Any]:
-    """Parse owner registration information from natural language."""
+    """Parse owner registration information from natural language. Use this FIRST before registering an owner. Extracts name, phone, and email from text like 'I am Jane Smith, phone 9876543211, email jane@example.com'."""
     return parse_owner_nl(text)
 
 
 @tool
 def parse_driver_tool(text: str) -> Dict[str, Any]:
-    """Parse driver registration information from natural language."""
+    """Parse driver registration information from natural language. Use this FIRST before registering a driver. Extracts name, phone, and license number from text like 'I am John Doe, phone 9876543210, license DL1234567890'."""
     return parse_driver_nl(text)
 
 
@@ -61,13 +61,13 @@ def parse_expense_tool(text: str) -> Dict[str, Any]:
 
 @tool
 def register_owner_tool(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Register a new owner in the database."""
+    """Register a new owner in the database. Use this AFTER parsing owner information. Takes parsed data from parse_owner_tool and creates an owner record."""
     return register_owner(parsed_data)
 
 
 @tool
 def register_driver_tool(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Register a new driver in the database."""
+    """Register a new driver in the database. Use this AFTER parsing driver information. Takes parsed data from parse_driver_tool and creates a driver record."""
     return register_driver(parsed_data)
 
 
@@ -126,7 +126,11 @@ def create_logistics_agent():
             register_owner_tool, register_driver_tool, add_vehicle_tool, add_trip_tool, add_expense_tool,
             # Query tools
             get_owner_summary_tool, get_vehicle_expenses_tool, get_trip_details_tool, get_driver_expenses_tool
-        ]
+        ],
+        prompt="""
+        You are a Logistics Management Agent specialized in handling transportation and logistics operations.
+        
+        """
     )
     
     return agent

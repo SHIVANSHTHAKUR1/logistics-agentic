@@ -1,4 +1,7 @@
 # Import models conditionally to avoid import errors
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+
 try:
     from .groq_models import groq_models
 except ImportError:
@@ -12,15 +15,19 @@ except ImportError:
 try:
     from .gemini_models import gemini_models
 except ImportError:
-    gemini_models = {}
+    gemini_models = {
+        
+    }
 
 try:
     from .ollama_models import ollama_models
 except ImportError:
     ollama_models = {}
 
-# DEFAULT_MODEL = groq_models["meta-llama/llama-4-scout-17b-16e-instruct"]
+DEFAULT_MODEL = groq_models.get("meta-llama/llama-4-scout-17b-16e-instruct")
+if DEFAULT_MODEL is None:
+    DEFAULT_MODEL = gemini_models.get("gemini-1.5-flash")
 # DEFAULT_MODEL = ollama_models["gpt-oss:20b"]
-DEFAULT_MODEL = openai_models.get("gpt-4o-mini")
+# DEFAULT_MODEL = openai_models.get("gpt-4o-mini")
 
 __all__ = ["groq_models", "openai_models", "gemini_models", "ollama_models", "DEFAULT_MODEL"]

@@ -19,6 +19,12 @@ def parse_driver_nl(text: str) -> Dict[str, Any]:
     return parser.parse_driver(text)
 
 
+def parse_user_nl(text: str) -> Dict[str, Any]:
+    """Parse user registration information from natural language."""
+    parser = get_parser()
+    return parser.parse_user(text)
+
+
 def parse_vehicle_nl(text: str) -> Dict[str, Any]:
     """Parse vehicle registration information from natural language."""
     parser = get_parser()
@@ -35,3 +41,15 @@ def parse_expense_nl(text: str) -> Dict[str, Any]:
     """Parse expense information from natural language."""
     parser = get_parser()
     return parser.parse_expense(text)
+
+
+def parse_load_nl(text: str) -> Dict[str, Any]:
+    """Parse load request information from natural language."""
+    parser = get_parser()
+    return parser.parse_load(text)
+
+
+def parse_location_nl(text: str) -> Dict[str, Any]:
+    """Parse location update information from natural language."""
+    parser = get_parser()
+    return parser.parse_location(text)

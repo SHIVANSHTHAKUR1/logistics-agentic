@@ -274,8 +274,8 @@ Rules:
 3. Default role to "customer" if unclear
 4. Create professional email if not provided
 
-Example:
-{{"owner_id": 1, "full_name": "John Doe", "email": "john.doe@company.com", "password_hash": "temp_hash_john_doe", "phone_number": "+919876543210", "role": "driver"}}
+Format example (DO NOT use these values):
+{{"owner_id": [number], "full_name": "[user name]", "email": "[email address]", "password_hash": "temp_hash_[clean_name]", "phone_number": "[phone number]", "role": "[driver/customer]"}}
 
 <|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
@@ -394,8 +394,8 @@ Rules:
 3. Ensure all strings are properly quoted
 4. Extract numeric owner_id from text patterns
 
-Example:
-{{"name": "John Smith", "phone": "+919876543210", "email": "john@example.com", "license_no": "DL1234567890", "owner_id": 1}}
+Format example (DO NOT use these values):
+{{"name": "[driver name]", "phone": "[phone number]", "email": "[email address]", "license_no": "[license number]", "owner_id": [number]}}
 
 <|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
@@ -548,85 +548,67 @@ EXAMPLE OUTPUT:
         return data
     
     def _fallback_parse_driver(self, text: str) -> Dict[str, Any]:
-        """Fallback parsing for driver data using regex."""
+        """Fallback parsing for driver data using regex - returns error for insufficient data."""
         import re
-        data = {"name": "Unknown Driver", "phone": None, "email": None, "license_no": None, "owner_id": 1}
         
-        # Extract name - more flexible patterns
-        name_patterns = [
-            r"(?:add\s+driver\s+|driver\s+)([A-Z][a-zA-Z\s]{1,60}?)(?:\s*,|\s+phone|\s+email|\s+license|\s+owner)",
-            r"(?:I am|I'm|This is|Name is|My name is)\s+([A-Z][a-zA-Z ]{1,60})",
-            r"([A-Z][a-z]+\s+[A-Z][a-z]+)",  # First Last format
-        ]
+        # Extract information first
+        name_match = re.search(r"(?:I am|I'm|name is|name:)\s+([A-Za-z\s]+)", text, re.IGNORECASE)
+        email_match = re.search(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", text)
+        phone_match = re.search(r"(?:phone|mobile|contact).*?(\+?[0-9\-\s]{10,15})", text, re.IGNORECASE)
+        license_match = re.search(r"(?:license|dl).*?([A-Z0-9]{6,15})", text, re.IGNORECASE)
         
-        for pattern in name_patterns:
-            name_match = re.search(pattern, text, re.IGNORECASE)
-            if name_match:
-                data['name'] = name_match.group(1).strip()
-                break
+        # Check if we have minimum required information for a driver
+        if not (name_match and phone_match and license_match):
+            return {
+                "status": "error",
+                "message": "Insufficient driver information. Please provide: full name, phone number, and driver's license number.",
+                "missing_fields": {
+                    "name": not bool(name_match),
+                    "phone": not bool(phone_match),
+                    "license": not bool(license_match)
+                }
+            }
         
-        # Extract email - flexible patterns
-        email_patterns = [
-            r"email\s*:?\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})",  # "email: user@domain.com"
-            r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})",  # Standard email pattern
-        ]
+        # Only if we have complete information, parse it
+        data = {
+            "name": name_match.group(1).strip(),
+            "phone": re.sub(r'[^\d+]', '', phone_match.group(1)),
+            "license_no": license_match.group(1),
+            "owner_id": 1
+        }
         
-        for pattern in email_patterns:
-            email_match = re.search(pattern, text, re.IGNORECASE)
-            if email_match:
-                data['email'] = email_match.group(1)
-                break
-        
-        # Extract phone - more flexible patterns
-        phone_patterns = [
-            r"phone\s*:?\s*(\+?\d{10,13})",  # "phone: 1234567890"
-            r"contact\s*:?\s*(\+?\d{10,13})",  # "contact: 1234567890"
-            r"(\+?\d{10,13})",  # Standard phone
-        ]
-        
-        for pattern in phone_patterns:
-            phone_match = re.search(pattern, text, re.IGNORECASE)
-            if phone_match:
-                data['phone'] = phone_match.group(1)
-                break
-        
-        # Extract license - more flexible patterns
-        license_patterns = [
-            r"license\s*:?\s*([A-Z0-9]{6,15})",  # "license: BR123456789"
-            r"license\s+(?:no|number)\s*:?\s*([A-Z0-9]{6,15})",  # "license no: BR123456789"
-            r"([A-Z]{2,3}\d{6,12})",  # License format like BR123456789
-        ]
-        
-        for pattern in license_patterns:
-            license_match = re.search(pattern, text, re.IGNORECASE)
-            if license_match:
-                data['license_no'] = license_match.group(1)
-                break
-        
-        # Extract owner_id - more flexible patterns
-        owner_patterns = [
-            r"owner\s+id\s*:?\s*(\d+)",  # "owner id 1"
-            r"owner\s*:?\s*(\d+)",  # "owner: 1" 
-            r"company\s+id\s*:?\s*(\d+)",  # "company id 1"
-            r"company\s*:?\s*(\d+)",  # "company: 1"
-        ]
-        
-        for pattern in owner_patterns:
-            owner_match = re.search(pattern, text, re.IGNORECASE)
-            if owner_match:
-                data['owner_id'] = int(owner_match.group(1))
-                break
+        # Add email if available
+        if email_match:
+            data['email'] = email_match.group(1)
+        else:
+            data['email'] = None
+            
+        # Extract owner_id if specified
+        owner_match = re.search(r"owner\s*(?:id)?\s*:?\s*(\d+)", text, re.IGNORECASE)
+        if owner_match:
+            data['owner_id'] = int(owner_match.group(1))
         
         return data
     
     def _fallback_parse_vehicle(self, text: str) -> Dict[str, Any]:
         """Fallback parsing for vehicle data using regex."""
         import re
-        data = {"reg_no": "UNKNOWN", "model": None, "owner_id": None}
+        data = {"license_plate": "UNKNOWN", "capacity_kg": 1000.0, "status": "available"}
         
+        # Extract license plate
         reg_match = re.search(r"([A-Z]{2}\d{2}[A-Z]{1,2}\d{4})", text)
         if reg_match:
-            data['reg_no'] = reg_match.group(1)
+            data['license_plate'] = reg_match.group(1)
+        
+        # Extract capacity
+        capacity_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:kg|kilograms?)", text, re.IGNORECASE)
+        if capacity_match:
+            data['capacity_kg'] = float(capacity_match.group(1))
+        else:
+            # Check for tons
+            tons_match = re.search(r"(\d+(?:\.\d+)?)\s*tons?", text, re.IGNORECASE)
+            if tons_match:
+                data['capacity_kg'] = float(tons_match.group(1)) * 1000
         
         return data
     
@@ -650,15 +632,26 @@ EXAMPLE OUTPUT:
     def _fallback_parse_expense(self, text: str) -> Dict[str, Any]:
         """Fallback parsing for expense data using regex."""
         import re
-        data = {"amount": 0.0, "category": None, "trip_id": None, "driver_id": None, "note": text}
+        data = {"amount": 0.0, "expense_type": "other", "trip_id": None, "driver_id": None, "description": text}
         
         amount_match = re.search(r"(Rs\.?\s*|INR\s*)?(\d{2,7}(?:\.\d{1,2})?)", text)
         if amount_match:
             data['amount'] = float(amount_match.group(2))
         
-        category_match = re.search(r"\b(fuel|toll|food|maintenance|repair|expense|loading|unloading)\b", text, re.IGNORECASE)
+        # Map common expense categories to proper expense types
+        expense_mapping = {
+            'fuel': 'fuel',
+            'toll': 'toll', 
+            'food': 'food',
+            'maintenance': 'maintenance',
+            'repair': 'maintenance',
+            'accommodation': 'accommodation'
+        }
+        
+        category_match = re.search(r"\b(fuel|toll|food|maintenance|repair|accommodation)\b", text, re.IGNORECASE)
         if category_match:
-            data['category'] = category_match.group(1).lower()
+            category = category_match.group(1).lower()
+            data['expense_type'] = expense_mapping.get(category, 'other')
         
         trip_match = re.search(r"trip\s*(?:id\s*)?(\d+)", text, re.IGNORECASE)
         if trip_match:
@@ -671,36 +664,37 @@ EXAMPLE OUTPUT:
         return data
     
     def _fallback_parse_user(self, text: str) -> Dict[str, Any]:
-        """Fallback parsing for user data using regex."""
+        """Fallback parsing for user data using regex - returns error for insufficient data."""
         import re
+        
+        # Check if we have enough information to create a real user
+        has_name = re.search(r"(?:I am|name is|name:)\s+([A-Za-z\s]+)", text, re.IGNORECASE)
+        has_email = re.search(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", text)
+        has_phone = re.search(r"(?:phone|mobile|contact).*?(\+?[0-9\-\s]{10,15})", text, re.IGNORECASE)
+        
+        # If we don't have minimum required information, return error
+        if not (has_name and has_email and has_phone):
+            return {
+                "status": "error",
+                "message": "Insufficient user information. Please provide: full name, email address, and phone number.",
+                "missing_fields": {
+                    "name": not bool(has_name),
+                    "email": not bool(has_email), 
+                    "phone": not bool(has_phone)
+                }
+            }
+        
+        # Only if we have complete information, parse it
         data = {
             "owner_id": 1,
-            "full_name": "Unknown User",
-            "email": "user@company.com",
-            "password_hash": "temp_hash_unknown",
-            "phone_number": "0000000000",
+            "full_name": has_name.group(1).strip(),
+            "email": has_email.group(1),
+            "password_hash": f"temp_hash_{has_name.group(1).replace(' ', '_').lower()}",
+            "phone_number": re.sub(r'[^\d+]', '', has_phone.group(1)),
             "role": "customer"
         }
         
-        # Extract name
-        name_match = re.search(r"(?:I am|name is|name:)\s+([A-Za-z\s]+)", text, re.IGNORECASE)
-        if name_match:
-            name = name_match.group(1).strip()
-            data['full_name'] = name
-            data['password_hash'] = f"temp_hash_{name.replace(' ', '_').lower()}"
-        
-        # Extract phone
-        phone_match = re.search(r"(?:phone|mobile|contact).*?(\+?[0-9\-\s]{10,15})", text, re.IGNORECASE)
-        if phone_match:
-            phone = re.sub(r'[^\d+]', '', phone_match.group(1))
-            data['phone_number'] = phone
-        
-        # Extract email
-        email_match = re.search(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", text)
-        if email_match:
-            data['email'] = email_match.group(1)
-        
-        # Extract role
+        # Extract role if specified
         role_match = re.search(r"\b(customer|driver|owner)\b", text, re.IGNORECASE)
         if role_match:
             data['role'] = role_match.group(1).lower()

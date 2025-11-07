@@ -4,9 +4,10 @@ import os
 import itertools
 import logging
 
-# Set up all 5 Google API keys
+# Set up all available Google API keys (checking both naming patterns)
 api_keys = [
-    os.getenv("GOOGLE_API_KEY_1"),
+    os.getenv("GOOGLE_API_KEY"),      # Primary key
+    os.getenv("GOOGLE_API_KEY_1"),   # Alternative primary
     os.getenv("GOOGLE_API_KEY_2"), 
     os.getenv("GOOGLE_API_KEY_3"),
     os.getenv("GOOGLE_API_KEY_4"),
@@ -26,33 +27,51 @@ def get_next_api_key():
     """Get the next API key in rotation"""
     return next(key_rotation)
 
-def create_gemini_model(model_name, max_retries=5):
+def create_gemini_model(model_name="gemini-pro", max_retries=3):
     """Create a Gemini model with API key rotation on failure and optimized parameters."""
+    if not api_keys:
+        raise ValueError("No Google API keys available")
+        
     for attempt in range(max_retries):
         try:
             api_key = get_next_api_key()
-            return ChatGoogleGenerativeAI(
+            model = ChatGoogleGenerativeAI(
                 model=model_name, 
                 google_api_key=api_key,
                 temperature=0.1,  # Low temperature for consistent parsing
-                max_output_tokens=2048,  # Reasonable limit for JSON responses
+                max_output_tokens=4096,  # Increased for tool calls
                 top_p=0.8,  # Focused responses
                 top_k=40,   # Balanced creativity
+                # Remove convert_system_message_to_human for newer models
             )
+            return model
         except Exception as e:
-            logging.warning(f"API key failed on attempt {attempt + 1}: {e}")
+            logging.warning(f"Gemini model {model_name} failed on attempt {attempt + 1}: {e}")
             if attempt == max_retries - 1:
-                raise Exception("All API keys failed")
-    
+                raise Exception(f"Gemini model {model_name} failed after {max_retries} attempts: {e}")
 
-gemini_models = {
-    #  models
-    "gemini-1.5-flash": create_gemini_model("gemini-1.5-flash"),
-    "gemini-1.5-pro": create_gemini_model("gemini-1.5-pro"),
+# Create gemini models with error handling
+def safe_create_model(model_key, model_name):
+    """Safely create a Gemini model, returning None if it fails."""
+    try:
+        return create_gemini_model(model_name)
+    except Exception as e:
+        logging.warning(f"Failed to create Gemini model {model_key} ({model_name}): {e}")
+        return None
 
-    # Gemini 2.5 Models
-    "gemini-2.5-pro": create_gemini_model("gemini-2.5-pro"),
-    "gemini-2.5-flash": create_gemini_model("gemini-2.5-flash"),
-    "gemini-2.5-flash-lite": create_gemini_model("gemini-2.5-flash-lite"),
-    "gemini-2.5-pro-deep-think": create_gemini_model("gemini-2.5-pro-deep-think"),
-}
+# Create models dictionary (some may fail and be None)
+gemini_models = {}
+
+# List of models to try in order of preference (using current Google model names)
+models_to_try = [
+    ("gemini-2.5-flash", "gemini-2.5-flash"),  # Latest fast model
+    ("gemini-2.0-flash", "gemini-2.0-flash"),  # Stable flash model
+    ("gemini-2.5-pro", "gemini-2.5-pro"),  # Latest pro model
+    ("gemini-flash-latest", "gemini-flash-latest"),  # Latest flash alias
+    ("gemini-pro-latest", "gemini-pro-latest"),  # Latest pro alias
+]
+
+for model_key, model_name in models_to_try:
+    model = safe_create_model(model_key, model_name)
+    if model is not None:
+        gemini_models[model_key] = model

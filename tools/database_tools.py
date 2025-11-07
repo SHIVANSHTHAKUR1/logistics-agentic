@@ -611,6 +611,41 @@ def get_trip_details(trip_id: int) -> Dict[str, Any]:
         db.close()
 
 
+def get_trip_expenses(trip_id: int) -> Dict[str, Any]:
+    """Get detailed expense breakdown for a trip: total, count, list, grouped by type."""
+    db = SessionLocal()
+    try:
+        trip = db.query(Trip).filter(Trip.trip_id == trip_id).first()
+        if not trip:
+            return {"status": "error", "message": f"Trip with ID {trip_id} not found"}
+        expenses = db.query(Expense).filter(Expense.trip_id == trip_id).all()
+        total = sum(e.amount for e in expenses)
+        breakdown: Dict[str, float] = {}
+        items = []
+        for e in expenses:
+            etype = e.expense_type.value
+            breakdown[etype] = breakdown.get(etype, 0.0) + e.amount
+            items.append({
+                "expense_id": e.expense_id,
+                "type": etype,
+                "amount": e.amount,
+                "description": e.description,
+                "created_at": e.created_at.isoformat()
+            })
+        return {
+            "status": "success",
+            "trip_id": trip_id,
+            "total_expense": total,
+            "expense_count": len(expenses),
+            "expense_breakdown": breakdown,
+            "expenses": items
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to get trip expenses: {str(e)}"}
+    finally:
+        db.close()
+
+
 def get_user_expenses(user_id: int) -> Dict[str, Any]:
     """Get expense summary for a user (driver)."""
     db = SessionLocal()
@@ -682,5 +717,131 @@ def get_load_details(load_id: int) -> Dict[str, Any]:
         }
     except Exception as e:
         return {"status": "error", "message": f"Failed to get load details: {str(e)}"}
+    finally:
+        db.close()
+
+
+def nl_update(text: str) -> Dict[str, Any]:
+    """Apply a simple natural-language update to the database in a single instruction.
+    Supported examples:
+    - "update driver 12 phone 9876543210"
+    - "set driver 12 email rahul@example.com"
+    - "change vehicle 5 status maintenance"
+    - "mark trip 7 completed"
+    - "set load 3 status in_transit"
+    Returns a dict with status and message.
+    """
+    import re
+    db = SessionLocal()
+    try:
+        s = text.strip()
+        low = s.lower()
+
+        ent_id = re.search(r"\b(driver|user|vehicle|trip|load)\s*(?:id\s*)?(\d+)\b", low)
+        ent_kind = None
+        ent_pk = None
+        if ent_id:
+            ent_kind = ent_id.group(1)
+            ent_pk = int(ent_id.group(2))
+
+        # Helper: normalize status words
+        def norm_status(word: str, kind: str):
+            w = word.strip().lower().replace(" ", "_")
+            if kind == "vehicle":
+                mapping = {"available":"available","in_use":"in_use","inuse":"in_use","maintenance":"maintenance","out_of_service":"out_of_service","outofservice":"out_of_service"}
+                return mapping.get(w)
+            if kind == "trip":
+                mapping = {"scheduled":"scheduled","in_progress":"in_progress","inprogress":"in_progress","completed":"completed","cancelled":"cancelled","canceled":"cancelled"}
+                return mapping.get(w)
+            if kind == "load":
+                mapping = {"pending":"pending","assigned":"assigned","in_transit":"in_transit","intransit":"in_transit","delivered":"delivered","cancelled":"cancelled"}
+                return mapping.get(w)
+            return None
+
+        if ent_kind in ("driver","user"):
+            user = db.query(User).filter(User.user_id == ent_pk).first()
+            if not user:
+                return {"status":"error","message":f"User/driver with ID {ent_pk} not found"}
+            updated = {}
+            m = re.search(r"\bphone\b\D*(\+?\d{8,15})", low)
+            if m:
+                user.phone_number = m.group(1)
+                updated["phone_number"] = user.phone_number
+            m = re.search(r"([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})", s)
+            if m and ("email" in low or "mail" in low):
+                user.email = m.group(1)
+                updated["email"] = user.email
+            m = re.search(r"(?:name\s+to|rename\s+to)\s+([A-Za-z][A-Za-z\s]{1,60})", s)
+            if m:
+                user.full_name = m.group(1).strip()
+                updated["full_name"] = user.full_name
+            if not updated:
+                return {"status":"error","message":"No supported fields found. Allowed: phone, email, name."}
+            db.commit()
+            return {"status":"success","message":f"Updated driver/user {user.user_id}", **updated}
+
+        if ent_kind == "vehicle":
+            vehicle = db.query(Vehicle).filter(Vehicle.vehicle_id == ent_pk).first()
+            if not vehicle:
+                return {"status":"error","message":"Vehicle not found"}
+            updated = {}
+            m = re.search(r"status\s+(\w+)", low)
+            if m:
+                st = norm_status(m.group(1), "vehicle")
+                if not st:
+                    return {"status":"error","message":"Invalid vehicle status"}
+                vehicle.status = VehicleStatus(st)
+                updated["status"] = vehicle.status.value
+            m = re.search(r"capacity\s*(\d+(?:\.\d+)?)", low)
+            if m:
+                vehicle.capacity_kg = float(m.group(1))
+                updated["capacity_kg"] = vehicle.capacity_kg
+            if not updated:
+                return {"status":"error","message":"No supported fields found. Allowed: status, capacity."}
+            db.commit()
+            return {"status":"success","message":f"Updated vehicle {vehicle.vehicle_id}", **updated}
+
+        if ent_kind == "trip":
+            trip = db.query(Trip).filter(Trip.trip_id == ent_pk).first()
+            if not trip:
+                return {"status":"error","message":f"Trip with ID {ent_pk} not found"}
+            st = None
+            m = re.search(r"status\s+(\w+)", low)
+            if m:
+                st = norm_status(m.group(1), "trip")
+            if not st:
+                for cand in ["scheduled","in_progress","inprogress","completed","cancelled","canceled"]:
+                    if cand in low:
+                        st = norm_status(cand, "trip")
+                        break
+            if not st:
+                return {"status":"error","message":"No valid trip status found"}
+            trip.status = TripStatus(st)
+            db.commit()
+            return {"status":"success","message":f"Updated trip {trip.trip_id}", "status": trip.status.value}
+
+        if ent_kind == "load":
+            load = db.query(Load).filter(Load.load_id == ent_pk).first()
+            if not load:
+                return {"status":"error","message":f"Load with ID {ent_pk} not found"}
+            st = None
+            m = re.search(r"status\s+(\w+)", low)
+            if m:
+                st = norm_status(m.group(1), "load")
+            if not st:
+                for cand in ["pending","assigned","in_transit","intransit","delivered","cancelled"]:
+                    if cand in low:
+                        st = norm_status(cand, "load")
+                        break
+            if not st:
+                return {"status":"error","message":"No valid load status found"}
+            load.status = LoadStatus(st)
+            db.commit()
+            return {"status":"success","message":f"Updated load {load.load_id}", "status": load.status.value}
+
+        return {"status":"error","message":"Couldn't determine target entity. Use e.g. 'driver 12', 'vehicle 5', 'trip 3', 'load 2'."}
+    except Exception as e:
+        db.rollback()
+        return {"status":"error","message":f"Failed to apply update: {str(e)}"}
     finally:
         db.close()

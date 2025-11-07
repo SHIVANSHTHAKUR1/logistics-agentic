@@ -26,8 +26,10 @@ from .database_tools import (
     get_owner_summary,
     get_vehicle_summary,
     get_trip_details,
+    get_trip_expenses,
     get_user_expenses,
-    get_load_details
+    get_load_details,
+    nl_update
 )
 
 from .llm_parser import LLMParser
@@ -52,7 +54,9 @@ __all__ = [
     "get_owner_summary",
     "get_vehicle_summary",
     "get_trip_details",
+    "get_trip_expenses",
     "get_user_expenses",
     "get_load_details",
+    "nl_update",
     "LLMParser"
 ]

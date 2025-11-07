@@ -84,6 +84,23 @@
             border-radius: 18px;
             position: relative;
             word-wrap: break-word;
+            line-height: 1.6;
+        }
+
+        .message-content code {
+            background: rgba(0, 0, 0, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .message.user .message-content code {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .message-content strong {
+            font-weight: 600;
         }
 
         .message.user .message-content {
@@ -197,6 +214,11 @@
 
         .examples-button:hover {
             background: #667eea;
+            color: white;
+        }
+
+        .examples-button:hover[style*="border-color: #e74c3c"] {
+            background: #e74c3c;
             color: white;
         }
 
@@ -323,23 +345,34 @@
             <div class="message agent">
                 <div class="message-avatar">🤖</div>
                 <div class="message-content">
-                    <div>Welcome to the Logistics Management System! I can help you with:</div>
+                    <div><strong>👋 Welcome to Logistics Agent!</strong></div>
                     <br>
-                    <div>• 🏢 Company registration and management</div>
-                    <div>• 👨‍💼 Driver registration and tracking</div>
-                    <div>• 🚛 Vehicle fleet management</div>
-                    <div>• 🛣️ Trip planning and execution</div>
-                    <div>• 💰 Expense tracking and reporting</div>
-                    <div>• 📦 Load management</div>
+                    <div>I can help you manage your logistics operations using natural language. Here's what I can do:</div>
                     <br>
-                    <div>How can I assist you today?</div>
-                    <div class="message-meta">System ready • Click examples below for sample queries</div>
+                    <div>• 🏢 Register companies, owners, drivers, and vehicles</div>
+                    <div>• 🚛 Create and manage trips</div>
+                    <div>• 📦 Handle loads and assignments</div>
+                    <div>• � Track expenses and generate reports</div>
+                    <div>• 📍 Update locations and track deliveries</div>
+                    <div>• � Query details using IDs, names, or license plates</div>
+                    <br>
+                    <div><strong>Quick Start:</strong></div>
+                    <div>• Try: <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">trip 1</code> or <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">vehicle 2 summary</code></div>
+                    <div>• Type <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">help</code> to see all available commands</div>
+                    <div>• Click "� View Examples" below for formatted examples</div>
+                    <br>
+                    <div style="font-size: 12px; opacity: 0.8;">💡 I understand context, so you can have natural conversations!</div>
+                    <div class="message-meta">System ready • Type your query or 'help' for assistance</div>
                 </div>
             </div>
         </div>
 
         <div class="chat-input-container">
-            <button class="examples-button" onclick="showExamples()">📋 View Examples</button>
+            <div style="display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;">
+                <button class="examples-button" onclick="sendHelpCommand()">❓ Help</button>
+                <button class="examples-button" onclick="showExamples()">📋 View Examples</button>
+                <button class="examples-button" onclick="clearHistory()" style="border-color: #e74c3c; color: #e74c3c;">🗑️ Clear Chat</button>
+            </div>
             <div class="input-group">
                 <textarea 
                     class="chat-input" 
@@ -404,10 +437,16 @@
                 metaText += ' • Error';
             }
             
+            // Format content with line breaks and preserve formatting
+            const formattedContent = content
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/• /g, '&nbsp;&nbsp;• ');
+            
             messageDiv.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
                 <div class="message-content">
-                    <div>${content}</div>
+                    <div>${formattedContent}</div>
                     <div class="message-meta">${metaText}</div>
                 </div>
             `;
@@ -466,24 +505,44 @@
         async function showExamples() {
             try {
                 const response = await fetch('/examples');
-                const examples = await response.json();
+                const data = await response.json();
                 
                 const container = document.getElementById('examplesContainer');
                 container.innerHTML = '';
                 
-                examples.forEach(category => {
-                    const categoryDiv = document.createElement('div');
-                    categoryDiv.className = 'examples-category';
-                    categoryDiv.innerHTML = `
-                        <h3>${category.category}</h3>
-                        ${category.examples.map(example => 
-                            `<div class="example-item" onclick="useExample('${example.replace(/'/g, "\\'")}')">
-                                ${example}
+                // Add categories
+                if (data.categories) {
+                    Object.keys(data.categories).forEach(categoryName => {
+                        const categoryDiv = document.createElement('div');
+                        categoryDiv.className = 'examples-category';
+                        
+                        const examples = data.categories[categoryName];
+                        categoryDiv.innerHTML = `
+                            <h3>${categoryName}</h3>
+                            ${examples.map(example => 
+                                `<div class="example-item" onclick="useExample('${example.replace(/'/g, "\\'")}')">
+                                    ${example}
+                                </div>`
+                            ).join('')}
+                        `;
+                        container.appendChild(categoryDiv);
+                    });
+                }
+                
+                // Add tips section
+                if (data.tips && data.tips.length > 0) {
+                    const tipsDiv = document.createElement('div');
+                    tipsDiv.className = 'examples-category';
+                    tipsDiv.innerHTML = `
+                        <h3 style="color: #667eea;">💡 Tips</h3>
+                        ${data.tips.map(tip => 
+                            `<div style="background: #f0f7ff; padding: 10px; border-radius: 8px; margin-bottom: 8px; font-size: 13px;">
+                                ${tip}
                             </div>`
                         ).join('')}
                     `;
-                    container.appendChild(categoryDiv);
-                });
+                    container.appendChild(tipsDiv);
+                }
                 
                 document.getElementById('examplesModal').style.display = 'block';
             } catch (error) {
@@ -498,6 +557,13 @@
         function useExample(example) {
             document.getElementById('messageInput').value = example;
             hideExamples();
+        }
+
+        async function sendHelpCommand() {
+            // Simulate sending "help" command
+            const input = document.getElementById('messageInput');
+            input.value = 'help';
+            await sendMessage();
         }
 
         // Close modal when clicking outside
@@ -516,6 +582,61 @@
             } catch (error) {
                 console.error('Health check failed:', error);
                 document.querySelector('.status-indicator').style.background = '#e74c3c';
+            }
+        }
+
+        async function clearHistory() {
+            if (!confirm('Are you sure you want to clear the conversation history?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/clear_history', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Clear the chat messages
+                    const messagesContainer = document.getElementById('chatMessages');
+                    messagesContainer.innerHTML = `
+                        <div class="message agent">
+                            <div class="message-avatar">🤖</div>
+                            <div class="message-content">
+                                <div><strong>👋 Welcome to Logistics Agent!</strong></div>
+                                <br>
+                                <div>I can help you manage your logistics operations using natural language. Here's what I can do:</div>
+                                <br>
+                                <div>• 🏢 Register companies, owners, drivers, and vehicles</div>
+                                <div>• 🚛 Create and manage trips</div>
+                                <div>• 📦 Handle loads and assignments</div>
+                                <div>• � Track expenses and generate reports</div>
+                                <div>• 📍 Update locations and track deliveries</div>
+                                <div>• � Query details using IDs, names, or license plates</div>
+                                <br>
+                                <div><strong>Quick Start:</strong></div>
+                                <div>• Try: <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">trip 1</code> or <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">vehicle 2 summary</code></div>
+                                <div>• Type <code style="background: #f0f0f0; padding: 2px 6px; border-radius: 3px;">help</code> to see all available commands</div>
+                                <div>• Click "� View Examples" below for formatted examples</div>
+                                <br>
+                                <div style="font-size: 12px; opacity: 0.8;">💡 I understand context, so you can have natural conversations!</div>
+                                <div class="message-meta">System ready • Type your query or 'help' for assistance</div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Show success message briefly
+                    addMessage(data.response, false);
+                } else {
+                    addMessage(`Failed to clear history: ${data.response}`, false, { success: false });
+                }
+            } catch (error) {
+                addMessage(`Connection error: ${error.message}`, false, { success: false });
+                console.error('Clear history error:', error);
             }
         }
 

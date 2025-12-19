@@ -378,8 +378,13 @@ def add_expense(parsed_data: Dict[str, Any]) -> Dict[str, Any]:
         for field in required_fields:
             if not parsed_data.get(field):
                 return {"status": "error", "message": f"'{field}' is required"}
-        
-        amount = parsed_data['amount']
+
+        # Coerce amount to numeric (LLM/regex parsers may return strings)
+        try:
+            amount = float(parsed_data['amount'])
+        except Exception:
+            return {"status": "error", "message": f"Invalid amount: {parsed_data.get('amount')}"}
+
         if amount <= 0:
             return {"status": "error", "message": "Amount must be greater than 0"}
         
@@ -562,7 +567,7 @@ def get_vehicle_summary(vehicle_id: int) -> Dict[str, Any]:
             "vehicle_id": vehicle_id,
             "license_plate": vehicle.license_plate,
             "capacity_kg": vehicle.capacity_kg,
-            "status": vehicle.status.value,
+            "vehicle_status": vehicle.status.value,
             "total_trips": len(trips),
             "total_loads": len(loads),
             "total_expense": total_expense,
@@ -597,7 +602,7 @@ def get_trip_details(trip_id: int) -> Dict[str, Any]:
             "trip_id": trip_id,
             "driver_id": trip.driver_id,
             "vehicle_id": trip.vehicle_id,
-            "status": trip.status.value,
+            "trip_status": trip.status.value,
             "start_time": trip.start_time.isoformat() if trip.start_time else None,
             "end_time": trip.end_time.isoformat() if trip.end_time else None,
             "total_expense": total_expense,
@@ -674,6 +679,73 @@ def get_user_expenses(user_id: int) -> Dict[str, Any]:
         }
     except Exception as e:
         return {"status": "error", "message": f"Failed to get user expenses: {str(e)}"}
+    finally:
+        db.close()
+
+
+def get_driver_details(driver_id: int) -> Dict[str, Any]:
+    """Get basic driver details and lightweight stats.
+
+    Notes:
+    - Uses the existing User table; driver is a User with role=DRIVER.
+    - Keeps output small and JSON-serializable for agent responses.
+    """
+    db = SessionLocal()
+    try:
+        driver = db.query(User).filter(User.user_id == driver_id).first()
+        if not driver:
+            return {"status": "error", "message": f"Driver with ID {driver_id} not found"}
+
+        if driver.role != UserRole.DRIVER:
+            return {
+                "status": "error",
+                "message": f"User {driver_id} is not a driver (role={driver.role.value})",
+            }
+
+        trips = db.query(Trip).filter(Trip.driver_id == driver_id).all()
+        trip_ids = [t.trip_id for t in trips]
+        expenses = db.query(Expense).filter(Expense.driver_id == driver_id).all()
+        total_expense = sum(e.amount for e in expenses)
+
+        active_trips = [t for t in trips if t.status in (TripStatus.SCHEDULED, TripStatus.IN_PROGRESS)]
+
+        return {
+            "status": "success",
+            "driver_id": driver.user_id,
+            "full_name": driver.full_name,
+            "email": driver.email,
+            "phone_number": driver.phone_number,
+            "owner_id": driver.owner_id,
+            "total_trips": len(trips),
+            "active_trips": len(active_trips),
+            "total_expense": total_expense,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to get driver details: {str(e)}"}
+    finally:
+        db.close()
+
+
+def get_user_details(user_id: int) -> Dict[str, Any]:
+    """Get basic user details (works for customer/driver/owner roles)."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            return {"status": "error", "message": f"User with ID {user_id} not found"}
+
+        return {
+            "status": "success",
+            "user_id": user.user_id,
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone_number": user.phone_number,
+            "role": user.role.value,
+            "owner_id": user.owner_id,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to get user details: {str(e)}"}
     finally:
         db.close()
 

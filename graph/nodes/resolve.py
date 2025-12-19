@@ -46,6 +46,7 @@ QUERY_INTENTS = {
     "vehicle_summary",
     "owner_summary",
     "load_details",
+    "driver_details",
     "user_expenses",
     "driver_expenses",
 }
@@ -62,7 +63,11 @@ def _resolve_owner_id(db, entities: Dict[str, Any]) -> Optional[int]:
 
 
 def _resolve_user_id(db, entities: Dict[str, Any], role: Optional[UserRole] = None) -> Optional[int]:
-    # Accept full_name/name, email, phone_number
+    """Resolve a customer/driver id from hints.
+
+    Current schema stores people in the `users` table with a `role` column.
+    When role is provided we filter by it; otherwise we try drivers first then customers.
+    """
     uid = entities.get("user_id") or entities.get("driver_id") or entities.get("customer_id")
     if uid:
         try:
@@ -73,23 +78,44 @@ def _resolve_user_id(db, entities: Dict[str, Any], role: Optional[UserRole] = No
     email = entities.get("email")
     phone = entities.get("phone_number") or entities.get("phone")
 
-    q = db.query(User)
-    if role is not None:
-        q = q.filter(User.role == role)
+    def query_driver() -> Optional[int]:
+        q = db.query(User).filter(User.role == UserRole.DRIVER)
+        if email:
+            row = q.filter(func.lower(User.email) == email.lower()).first()
+            if row:
+                return row.user_id
+        if phone:
+            row = q.filter(User.phone_number == phone).first()
+            if row:
+                return row.user_id
+        if name:
+            row = q.filter(func.lower(User.full_name) == name.lower()).first()
+            if row:
+                return row.user_id
+        return None
 
-    if email:
-        row = q.filter(func.lower(User.email) == email.lower()).first()
-        if row:
-            return row.user_id
-    if phone:
-        row = q.filter(User.phone_number == phone).first()
-        if row:
-            return row.user_id
-    if name:
-        row = q.filter(func.lower(User.full_name) == name.lower()).first()
-        if row:
-            return row.user_id
-    return None
+    def query_customer() -> Optional[int]:
+        q = db.query(User).filter(User.role == UserRole.CUSTOMER)
+        if email:
+            row = q.filter(func.lower(User.email) == email.lower()).first()
+            if row:
+                return row.user_id
+        if phone:
+            row = q.filter(User.phone_number == phone).first()
+            if row:
+                return row.user_id
+        if name:
+            row = q.filter(func.lower(User.full_name) == name.lower()).first()
+            if row:
+                return row.user_id
+        return None
+
+    if role == UserRole.DRIVER:
+        return query_driver()
+    if role == UserRole.CUSTOMER:
+        return query_customer()
+    # role None: prefer driver resolution first
+    return query_driver() or query_customer()
 
 
 def _resolve_vehicle_id(db, entities: Dict[str, Any]) -> Optional[int]:
@@ -129,12 +155,11 @@ def resolve_node(state: CoreState) -> CoreState:
                 if intent == "owner_summary":
                     entities["id"] = oid
 
-        if intent in {"add_trip", "add_expense", "user_expenses", "driver_expenses"}:
-            # Drivers are users with role DRIVER for trip/expense; for user_expenses accept any role
-            role = UserRole.DRIVER if intent in {"add_trip", "add_expense", "driver_expenses"} else None
-            uid = _resolve_user_id(db, entities, role)
+        if intent in {"add_trip", "add_expense", "user_expenses", "driver_expenses", "driver_details"}:
+            # Expenses/trips are always attached to drivers.
+            uid = _resolve_user_id(db, entities, UserRole.DRIVER)
             if uid:
-                if intent in {"user_expenses", "driver_expenses"}:
+                if intent in {"user_expenses", "driver_expenses", "driver_details"}:
                     entities["id"] = uid
                 # For trips/expenses, fill driver_id
                 if intent in {"add_trip", "add_expense"}:
@@ -165,7 +190,11 @@ def resolve_node(state: CoreState) -> CoreState:
         # For queries: require entities['id']
         if intent in QUERY_INTENTS:
             if entities.get("id") is None:
-                state["last_result"] = {"status": "incomplete", "message": "Couldn't resolve target ID for query."}
+                # Give verify_node a field name so it can ask a targeted question.
+                if intent == "driver_details":
+                    state["last_result"] = {"status": "incomplete", "message": "Missing fields: driver_id"}
+                else:
+                    state["last_result"] = {"status": "incomplete", "message": "Couldn't resolve target ID for query."}
                 state["next_action"] = "verify"
             else:
                 state["entities"] = entities

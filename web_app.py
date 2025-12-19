@@ -51,6 +51,29 @@ app.secret_key = 'logistics_secret_key_' + str(uuid.uuid4())
 # Store conversation histories (in production, use Redis or database)
 conversation_histories = {}
 
+
+ALLOWED_ROLES = {"customer", "driver", "owner"}
+
+
+def _normalize_role(role: str) -> str:
+    r = (role or "").strip().lower()
+    return r if r in ALLOWED_ROLES else "owner"
+
+
+def _set_session_role(new_role: str) -> None:
+    """Set session role; if changed, clear per-session conversation and entities."""
+    new_role = _normalize_role(new_role)
+    prev_role = _normalize_role(session.get("role", "owner"))
+    if prev_role != new_role:
+        # Role change implies new permissions/context; clear continuity state.
+        session["role"] = new_role
+        session.pop("entities", None)
+        sid = session.get("session_id")
+        if sid and sid in conversation_histories:
+            del conversation_histories[sid]
+    else:
+        session["role"] = new_role
+
 def get_conversation_history(session_id: str) -> list:
     """Get conversation history for a session."""
     return conversation_histories.get(session_id, [])
@@ -59,7 +82,7 @@ def update_conversation_history(session_id: str, messages: list):
     """Update conversation history for a session."""
     conversation_histories[session_id] = messages
 
-def process_logistics_request(user_input: str, session_id: str = None) -> dict:
+def process_logistics_request(user_input: str, session_id: str = None, actor_role: str = "owner") -> dict:
     """Process logistics requests using the intelligent agent."""
     try:
         start_time = datetime.now()
@@ -90,6 +113,7 @@ def process_logistics_request(user_input: str, session_id: str = None) -> dict:
                     "messages": messages_history,
                     "user_input": user_input,
                     "entities": session_entities,
+                    "actor_role": actor_role,
                 })
                 
                 # Extract the final response from messages and update conversation
@@ -137,7 +161,7 @@ def process_logistics_request(user_input: str, session_id: str = None) -> dict:
 • "register driver named Priya with license DL1234567890 phone 9988776655"
 • "add vehicle MH12AB3456 with capacity 5000kg for owner 1"
 
-� **Trip Management:**
+🚛 **Trip Management:**
 • "create trip with driver 1 and vehicle 2"
 • "show trip 1 details" or just "trip 1"
 • "show trip 1 expenses"
@@ -203,6 +227,12 @@ def chat():
     try:
         data = request.get_json()
         user_message = data.get('message', '').strip()
+        actor_role = _normalize_role(data.get('role', session.get('role', 'owner')))
+
+        # Ensure session exists and role is set early so help/examples reflect the current mode.
+        if 'session_id' not in session:
+            session['session_id'] = str(uuid.uuid4())
+        _set_session_role(actor_role)
         
         if not user_message:
             return jsonify({
@@ -232,14 +262,10 @@ def chat():
                 "timestamp": datetime.now().strftime("%H:%M:%S")
             })
         
-        # Get or create session ID
-        if 'session_id' not in session:
-            session['session_id'] = str(uuid.uuid4())
-        
         session_id = session['session_id']
         
         # Get response from the autonomous agent with conversation history
-        result = process_logistics_request(user_message, session_id)
+        result = process_logistics_request(user_message, session_id, actor_role=session.get('role', 'owner'))
         
         return jsonify(result)
         
@@ -287,59 +313,74 @@ def welcome():
 @app.route('/examples')
 def examples():
     """Get example queries for the agent."""
-    return jsonify({
-        "categories": {
+    role = _normalize_role(request.args.get('role') or session.get('role', 'owner'))
+
+    examples_by_role = {
+        "customer": {
+            "Load Management": [
+                "create load customer 1 pickup Mumbai delivery Pune weight 1500kg description electronics",
+                "show load 3 details",
+                "load 3",
+            ],
+        },
+        "driver": {
+            "Trip & Expenses": [
+                "trip 1 details",
+                "show trip 1 expenses",
+                "add expense trip 1 fuel 500 driver 1",
+                "driver 1 expenses",
+            ],
+            "Location Updates": [
+                "add location for trip 2 lat 19.0760 lng 72.8777 address Andheri",
+            ],
+        },
+        "owner": {
             "Registration & Setup": [
-                "register user Raj Kumar with phone 9876543210 and email raj@example.com",
                 "add owner ABC Logistics with email contact@abc.com",
-                "register driver named Priya with license DL1234567890 phone 9988776655",
-                "add vehicle MH12AB3456 with capacity 5000kg for owner 1"
+                "register driver Bob Smith email bob@test.com phone 9988776655 owner 1",
+                "add vehicle MH12AB3456 with capacity 5000kg for owner 1",
             ],
             "Trip Management": [
                 "create trip with driver 1 and vehicle 2",
                 "show trip 1 details",
                 "show trip 1 expenses",
-                "update trip 3 end time 2024-01-15 14:30"
             ],
             "Load Management": [
-                "create load pickup Mumbai delivery Pune weight 1500kg description electronics",
+                "create load customer 1 pickup Mumbai delivery Pune weight 1500kg description electronics",
                 "assign load 2 to trip 1",
                 "show load 3 details",
-                "update load 5 status delivered"
             ],
-            "Vehicle & Driver Queries": [
+            "Summaries": [
+                "owner 1 summary",
                 "vehicle 2 summary",
-                "show vehicle MH01AB1234",
-                "driver 1 summary",
-                "update vehicle 3 status maintenance",
-                "change driver 1 phone 9876543210"
             ],
-            "Expenses & Tracking": [
-                "add expense trip 1 fuel 500 description diesel",
-                "driver 2 spent 300 on toll for trip 1",
-                "show driver 1 expenses",
-                "total expenses"
-            ],
-            "Location Updates": [
-                "update location trip 1 at Mumbai",
-                "add location for trip 2 lat 19.0760 lng 72.8777 address Andheri"
-            ],
-            "Quick Queries": [
-                "trip 1",
-                "vehicle 2",
-                "driver 3",
-                "load 4",
-                "owner 1"
-            ]
         },
+    }
+
+    return jsonify({
+        "role": role,
+        "categories": examples_by_role.get(role, examples_by_role["owner"]),
         "tips": [
-            "💡 You can use natural language - the agent understands context",
-            "💡 IDs are automatically resolved from names, license plates, or phone numbers",
-            "💡 After querying a trip, you can ask 'total expenses' to see trip expenses",
-            "💡 Use 'update' or 'change' for modifications (e.g., 'update vehicle 2 status available')",
-            "💡 The agent remembers your conversation context within the session"
-        ]
+            "💡 Your access depends on the selected mode (customer/driver/owner).",
+            "💡 Use IDs (trip_id/load_id/driver_id/vehicle_id) when possible for best results.",
+            "💡 The agent keeps context within the current session and mode.",
+        ],
     })
+
+
+@app.route('/set_role', methods=['POST'])
+def set_role():
+    """Set the current UI mode (customer/driver/owner)."""
+    try:
+        data = request.get_json() or {}
+        role = _normalize_role(data.get('role', 'owner'))
+        # Ensure session id exists before clearing history
+        if 'session_id' not in session:
+            session['session_id'] = str(uuid.uuid4())
+        _set_session_role(role)
+        return jsonify({"success": True, "role": session.get('role', 'owner')})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)})
 
 @app.route('/clear_history', methods=['POST'])
 def clear_history():
@@ -366,8 +407,8 @@ if __name__ == '__main__':
     print("🚚 Starting Logistics Agent Web Interface...")
     print("📱 Access the chat at: http://localhost:5000")
     print("🔧 Health check at: http://localhost:5000/health")
-    print("� Welcome message: http://localhost:5000/welcome")
-    print("�📋 Examples API: http://localhost:5000/examples")
+    print("👋 Welcome message: http://localhost:5000/welcome")
+    print("📋 Examples API: http://localhost:5000/examples")
     print("\n💡 In chat, type 'help' or 'examples' to see all commands")
     
     if TOOLS_AVAILABLE:

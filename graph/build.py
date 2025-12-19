@@ -49,6 +49,7 @@ def build_graph():
             "resolve": "resolve",
             "exec_mutation": "exec_mutation",
             "query_agent": "query_agent",
+            "verify": "verify",
             "chat": "chat",
             "end": END,
         }

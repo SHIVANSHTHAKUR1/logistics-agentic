@@ -28,6 +28,8 @@ from .database_tools import (
     get_trip_details,
     get_trip_expenses,
     get_user_expenses,
+    get_driver_details,
+    get_user_details,
     get_load_details,
     nl_update
 )
@@ -56,6 +58,8 @@ __all__ = [
     "get_trip_details",
     "get_trip_expenses",
     "get_user_expenses",
+    "get_driver_details",
+    "get_user_details",
     "get_load_details",
     "nl_update",
     "LLMParser"

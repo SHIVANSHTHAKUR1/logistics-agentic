@@ -19,7 +19,7 @@ class OwnerData(BaseModel):
 
 class UserData(BaseModel):
     """Schema for user registration data."""
-    owner_id: int = Field(description="Owner/company ID this user belongs to")
+    owner_id: Optional[int] = Field(default=None, description="Owner/company ID (required for drivers; omit for customers)")
     full_name: str = Field(description="Full name of the user")
     email: str = Field(description="Email address")
     password_hash: str = Field(description="Hashed password")
@@ -261,7 +261,7 @@ You are a data extraction assistant. Extract user registration information and r
 Extract user information from: "{text}"
 
 Return only a JSON object with these exact fields:
-- owner_id: Company ID (use 1 if not specified)
+- owner_id: Company ID (REQUIRED only if role is "driver"; omit or set null for customers)
 - full_name: Complete name (required)
 - email: Email address (required)
 - password_hash: Generate as "temp_hash_[name]" (required)
@@ -275,7 +275,7 @@ Rules:
 4. Create professional email if not provided
 
 Format example (DO NOT use these values):
-{{"owner_id": [number], "full_name": "[user name]", "email": "[email address]", "password_hash": "temp_hash_[clean_name]", "phone_number": "[phone number]", "role": "[driver/customer]"}}
+{{"owner_id": [number_or_null], "full_name": "[user name]", "email": "[email address]", "password_hash": "temp_hash_[clean_name]", "phone_number": "[phone number]", "role": "[driver/customer]"}}
 
 <|eot_id|><|start_header_id|>assistant<|end_header_id|>
 

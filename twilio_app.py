@@ -17,6 +17,11 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN") 
 TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
 
+# If enabled, the webhook will attempt to respond via Twilio REST API.
+# Default is disabled because returning TwiML is sufficient for inbound webhooks
+# and avoids account-level daily send limits.
+TWILIO_USE_REST_SEND = os.getenv("TWILIO_USE_REST_SEND") == "1"
+
 # Initialize Twilio client (safely)
 try:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) if TWILIO_ACCOUNT_SID else None
@@ -45,6 +50,8 @@ def _invoke_agent(user_input: str, sender_id: str) -> str:
         "messages": container["messages"],
         "user_input": user_input,
         "entities": container["entities"],
+        # WhatsApp channel runs as a privileged role (no UI role-selection).
+        "actor_role": "whatsapp",
         "auto_loop": os.getenv("AUTO_LOOP") == "1",
         "max_iterations": int(os.getenv("MAX_AUTO_ITERS", 2)),
     }
@@ -78,6 +85,7 @@ def health():
         "agent": "langgraph",
         "whatsapp": "enabled" if twilio_client else "disabled",
         "twilio_configured": bool(TWILIO_ACCOUNT_SID),
+        "twilio_rest_send": "enabled" if TWILIO_USE_REST_SEND else "disabled",
         "sessions": len(_conversations),
         "auto_loop": os.getenv("AUTO_LOOP") == "1",
         "max_auto_iters": int(os.getenv("MAX_AUTO_ITERS", 2)),
@@ -128,6 +136,7 @@ def _validate_twilio_signature(signature: str | None, url: str, params: dict) ->
         return False
 
 @app.post("/webhook/whatsapp")
+@app.post("/webhook.whatsapp")
 async def whatsapp_webhook(request: Request, x_twilio_signature: str | None = Header(default=None)):
     """Complete WhatsApp Integration - Receive AND Respond"""
     try:
@@ -146,8 +155,9 @@ async def whatsapp_webhook(request: Request, x_twilio_signature: str | None = He
         reply = _invoke_agent(message_body, from_number)
         logger.info(f"💬 Reply: {reply[:120]}...")
 
-        # Prefer REST outbound if Twilio client configured; otherwise return TwiML inline
-        if twilio_client and TWILIO_WHATSAPP_NUMBER:
+        # Optional REST outbound (disabled by default). For inbound webhooks, returning TwiML
+        # is sufficient and avoids hitting account-level daily send limits.
+        if TWILIO_USE_REST_SEND and twilio_client and TWILIO_WHATSAPP_NUMBER:
             try:
                 message = twilio_client.messages.create(
                     from_=f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",

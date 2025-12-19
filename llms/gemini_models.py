@@ -64,11 +64,11 @@ gemini_models = {}
 
 # List of models to try in order of preference (using current Google model names)
 models_to_try = [
-    ("gemini-2.5-flash", "gemini-2.5-flash"),  # Latest fast model
-    ("gemini-2.0-flash", "gemini-2.0-flash"),  # Stable flash model
-    ("gemini-2.5-pro", "gemini-2.5-pro"),  # Latest pro model
-    ("gemini-flash-latest", "gemini-flash-latest"),  # Latest flash alias
-    ("gemini-pro-latest", "gemini-pro-latest"),  # Latest pro alias
+    ("gemini-3.0-flash", "gemini-3.0-flash"),
+    ("gemini-3.0-pro", "gemini-3.0-pro"),
+    ("gemini-3.0-flash-latest", "gemini-3.0-flash-latest"),
+    ("gemini-3.0-pro-latest", "gemini-3.0-pro-latest"),
+    ("gemini-3.0", "gemini-3.0"),
 ]
 
 for model_key, model_name in models_to_try:

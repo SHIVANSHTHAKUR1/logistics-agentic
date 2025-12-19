@@ -43,6 +43,7 @@ from tools import (
 )
 from tools.database_tools import SessionLocal, Owner  # for owner auto-detection
 from ..state import CoreState
+from ..authz import is_intent_allowed, deny_message, normalize_role
 
 MUTATION_MAP = {
     "register_owner": register_owner,
@@ -79,6 +80,7 @@ def _normalize_payload(intent: str, entities: Dict[str, Any]) -> Dict[str, Any]:
         email = _coalesce(entities, "email")
         phone = _coalesce(entities, "phone_number", "phone")
         role = _coalesce(entities, "role")
+        license_no = _coalesce(entities, "license_no", "license", "license_number")
         # Heuristic: if role missing and user_input mentions 'customer' or 'driver'
         if not role:
             raw = (entities.get("_raw_user_input") or "").lower()
@@ -112,6 +114,7 @@ def _normalize_payload(intent: str, entities: Dict[str, Any]) -> Dict[str, Any]:
             "password_hash": password_hash,
             "phone_number": phone,
             "role": role,
+            "license_no": license_no,
         }
     if intent == "add_vehicle":
         plate = _coalesce(entities, "license_plate", "plate", "license", "license_no")
@@ -173,7 +176,8 @@ def _normalize_payload(intent: str, entities: Dict[str, Any]) -> Dict[str, Any]:
 
 REQUIRED_FIELDS = {
     "register_owner": ["company_name", "business_address", "contact_email"],
-    "register_user": ["owner_id", "full_name", "email", "phone_number", "role"],
+    # owner_id is only required when role=driver (customers are global)
+    "register_user": ["full_name", "email", "phone_number", "role"],
     "add_vehicle": ["owner_id", "license_plate", "capacity_kg"],
     "add_trip": ["driver_id", "vehicle_id"],
     "add_expense": ["driver_id", "amount", "expense_type"],
@@ -185,6 +189,7 @@ REQUIRED_FIELDS = {
 
 def exec_mutation_node(state: CoreState) -> CoreState:
     intent = state.get("intent", "")
+    actor_role = normalize_role(state.get("actor_role"))
     entities: Dict[str, Any] = state.get("entities", {})
     messages = state.get("messages", [])
     fn = MUTATION_MAP.get(intent)
@@ -196,9 +201,24 @@ def exec_mutation_node(state: CoreState) -> CoreState:
     # Normalize entity keys before validation
     payload = _normalize_payload(intent, dict(entities))
 
+    # UX: In customer mode, allow "register" without forcing the user to specify role.
+    # Customer sessions can only register as customers (authz enforces this).
+    if intent == "register_user" and actor_role == "customer" and payload.get("role") in (None, ""):
+        payload["role"] = "customer"
+
+    # Authorization gate
+    if not is_intent_allowed(actor_role, intent, payload):
+        state["last_result"] = {"status": "error", "message": deny_message(actor_role, intent)}
+        state["next_action"] = "verify"
+        return state
+
     # Validate required fields (skip for nl_update which parses raw text)
     if intent != "nl_update":
         missing = [f for f in REQUIRED_FIELDS.get(intent, []) if payload.get(f) in (None, "")]
+        if intent == "register_user":
+            role = (payload.get("role") or "").lower().strip()
+            if role == "driver" and payload.get("owner_id") in (None, ""):
+                missing.append("owner_id")
         if missing:
             state["last_result"] = {"status": "incomplete", "message": f"Missing fields: {', '.join(missing)}"}
             state["next_action"] = "verify"

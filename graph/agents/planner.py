@@ -48,6 +48,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from llms import DEFAULT_MODEL
 from ..state import CoreState
 from ..prompts import DETAILED_PLANNER_SYSTEM
+from ..authz import is_intent_allowed, deny_message, normalize_role
 
 PLANNER_SYSTEM = DETAILED_PLANNER_SYSTEM
 
@@ -57,6 +58,8 @@ INTENT_NORMALIZE = {
     "query_vehicle": "vehicle_summary",
     "query_owner": "owner_summary",
     "query_load": "load_details",
+    "query_driver": "driver_details",
+    "query_user": "user_details",
     "query_user_expenses": "user_expenses",
     "query_driver_expenses": "driver_expenses",
 }
@@ -104,11 +107,20 @@ def _needs_resolution(intent: str, entities: Dict[str, Any]) -> bool:
 def planner_node(state: CoreState) -> CoreState:
     messages = state.get("messages", [])
     user_input = state.get("user_input", "")
+    actor_role = normalize_role(state.get("actor_role"))
     # Focus heuristic: if recent turn requested a specific trip, store focus to bias next generic queries
     focus = state.get("focus", {}) or {}
     # Build prompt
     sys = SystemMessage(content=PLANNER_SYSTEM)
-    msgs = [sys, HumanMessage(content=user_input)]
+    role_hint = SystemMessage(
+        content=(
+            "You MUST respect the current application mode. "
+            f"Current mode: {actor_role}. "
+            "Choose only task_types that are appropriate for this mode. "
+            "If the request is not allowed, return task_type=chat and explain briefly."
+        )
+    )
+    msgs = [sys, role_hint, HumanMessage(content=user_input)]
     intent = "chat"
     entities: Dict[str, Any] = {}
     try:
@@ -140,6 +152,22 @@ def planner_node(state: CoreState) -> CoreState:
         merged = dict(prev_entities)
         merged.update(entities)
         entities = merged
+
+    # Normalize common query IDs: planner may emit driver_id/vehicle_id/etc.
+    # Query execution expects entities['id'].
+    if intent in QUERY_INTENTS and entities.get("id") is None:
+        if intent == "driver_details":
+            entities["id"] = entities.get("driver_id") or entities.get("user_id")
+        elif intent == "trip_details":
+            entities["id"] = entities.get("trip_id")
+        elif intent == "vehicle_summary":
+            entities["id"] = entities.get("vehicle_id")
+        elif intent == "owner_summary":
+            entities["id"] = entities.get("owner_id")
+        elif intent == "load_details":
+            entities["id"] = entities.get("load_id")
+        elif intent == "user_details":
+            entities["id"] = entities.get("user_id")
     # Stash raw user input for downstream heuristics (e.g., role inference during register_user)
     if user_input:
         entities["_raw_user_input"] = user_input
@@ -161,6 +189,15 @@ def planner_node(state: CoreState) -> CoreState:
         next_action = "chat"
     else:
         next_action = "chat"
+
+    # Hard authorization gate (defense in depth)
+    if not is_intent_allowed(actor_role, intent, entities):
+        state["last_result"] = {"status": "error", "message": deny_message(actor_role, intent)}
+        state["intent"] = intent
+        state["entities"] = entities
+        state["next_action"] = "verify"
+        state["focus"] = focus
+        return state
 
     # Track focus when a trip is queried so next turn can refer to 'total expenses' implicitly
     if intent in {"trip_details", "trip_expenses"} and entities.get("id") is not None:

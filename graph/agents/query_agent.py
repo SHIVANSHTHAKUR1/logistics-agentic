@@ -27,7 +27,10 @@ from tools import (
     get_load_details,
     get_user_expenses,
     get_trip_expenses,
+    get_driver_details,
+    get_user_details,
 )
+from ..authz import is_intent_allowed, deny_message, normalize_role
 from ..state import CoreState  # type: ignore
 
 
@@ -37,6 +40,8 @@ INTENT_TOOL_MAP = {
     "vehicle_summary": get_vehicle_summary,
     "owner_summary": get_owner_summary,
     "load_details": get_load_details,
+    "driver_details": get_driver_details,
+    "user_details": get_user_details,
     "driver_expenses": get_user_expenses,
     "user_expenses": get_user_expenses,
 }
@@ -44,8 +49,15 @@ INTENT_TOOL_MAP = {
 
 def query_agent_node(state: CoreState) -> CoreState:
     intent = state.get("intent")
+    actor_role = normalize_role(state.get("actor_role"))
     entities = state.get("entities", {})
     messages = state.get("messages", [])
+
+    if not is_intent_allowed(actor_role, intent, entities):
+        state["last_result"] = {"status": "error", "message": deny_message(actor_role, intent)}
+        state["next_action"] = "verify"
+        return state
+
     tool = INTENT_TOOL_MAP.get(intent)
     if not tool:
         messages.append(AIMessage(content="Unsupported query intent."))

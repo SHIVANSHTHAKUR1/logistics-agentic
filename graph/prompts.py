@@ -22,7 +22,7 @@ DETAILED_PLANNER_SYSTEM = (
     "OUTPUT RULES (CRITICAL):\n"
     "- Output ONLY raw JSON (no markdown fences, no commentary).\n"
     "- JSON shape: {\"task_type\": string, \"entities\": { ...flat key:value ... }}\n"
-    "- task_type MUST be one of: register_owner, register_user, add_vehicle, add_trip, add_expense, create_load, assign_load_to_trip, add_location_update, nl_update, query_trip, query_trip_expenses, query_vehicle, query_owner, query_load, query_user_expenses, query_driver_expenses, chat.\n"
+    "- task_type MUST be one of: register_owner, register_user, add_vehicle, add_trip, add_expense, create_load, assign_load_to_trip, add_location_update, nl_update, query_trip, query_trip_expenses, query_vehicle, query_owner, query_load, query_driver, query_user_expenses, query_driver_expenses, chat.\n"
     "- entities MUST be a flat object (no nesting) with extracted ids, names, emails, phones, plates, capacities, addresses, weights, times, amounts, expense_type, status, description, receipt_url.\n"
     "Behavior & Restraints:\n"
     "- DO NOT invent data. If user didn't supply a field, omit it.\n"

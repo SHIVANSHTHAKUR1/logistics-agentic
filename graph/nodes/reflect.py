@@ -23,6 +23,7 @@ def _structured_trip(result: Dict[str, Any]) -> List[str]:
     lines.append("-------------")
     mapping = [
         ("trip_id", "Trip ID"),
+        ("trip_status", "Status"),
         ("driver_id", "Driver ID"),
         ("vehicle_id", "Vehicle ID"),
         ("start_time", "Start Time"),
@@ -54,13 +55,17 @@ def reflect_node(state: CoreState) -> CoreState:
     result: Dict[str, Any] = state.get("last_result", {}) or {}
     intent = state.get("intent") or ""
     user_input = state.get("user_input") or ""
+    ents = state.get("entities", {}) or {}
+    ocr_prefix = ents.pop("_ocr_suggestion_text", None)
+    if ocr_prefix is not None:
+        state["entities"] = ents
 
     force_json = os.getenv("STRUCTURED_OUTPUT", "").lower() == "json" or "json" in user_input.lower()
 
     # English-only formatting as per user request
     if force_json and isinstance(result, dict):
         content = _as_json(result)
-    elif intent == "trip_details" and isinstance(result, dict):
+    elif intent == "trip_details" and isinstance(result, dict) and result.get("status") == "success":
         content = "\n".join(_structured_trip(result))
     elif isinstance(result, dict) and result.get("status") == "incomplete" and (result.get("questions") or result.get("optional_questions")):
         # Structured missing-fields guidance (required + optional)
@@ -114,6 +119,9 @@ def reflect_node(state: CoreState) -> CoreState:
                 val = "(not set)" if v in (None, "null") else v
                 lines.append(f"{k}: {val}")
         content = "\n".join(lines) if lines else (state.get("summary") or "No data")
+
+    if ocr_prefix:
+        content = f"{ocr_prefix}\n\n{content}"
 
     messages.append(AIMessage(content=content))
     state["messages"] = messages

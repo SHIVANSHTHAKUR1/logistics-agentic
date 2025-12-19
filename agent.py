@@ -28,7 +28,7 @@ from graph.build import main_graph as main_agent
 
 __all__ = ["main_agent", "invoke_agent"]
 
-def invoke_agent(user_input: str, messages=None, entities=None):
+def invoke_agent(user_input: str, messages=None, entities=None, actor_role: str = "owner"):
     """Convenience helper to invoke the modular graph.
 
     Args:
@@ -40,6 +40,7 @@ def invoke_agent(user_input: str, messages=None, entities=None):
     state = {
         "messages": messages or [],
         "user_input": user_input,
+        "actor_role": actor_role,
     }
     if entities:
         # Allow caller to supply previous partial entities for multi-turn completion

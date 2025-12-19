@@ -211,3 +211,14 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Reports and Presentations
+*.ppt
+*.pptx
+*.pdf
+*report*
+*Report*
+
+# Database backups
+logistics.db.bak*
+*.db.bak*
